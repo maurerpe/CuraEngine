@@ -1,3 +1,13 @@
+# Autotools CuraEngine
+This is a fork of Ultamaker/CuraEngine that uses the autotools build system which makes building and installing much easier on posix compliant operating systems.
+
+## Build instructions
+1. `autoreconf -I m4 --install`
+2. `./configure`
+3. `make`
+4. `sudo make install`
+
+See `./configure --help` for more details
 
 <br>
 
