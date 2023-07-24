@@ -6,6 +6,7 @@ AC_INIT([CuraEngine], [5.4.0])
 AM_INIT_AUTOMAKE([subdir-objects foreign])
 AC_CONFIG_SRCDIR([src/Slice.cpp])
 AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_MACRO_DIR([m4])
 
 AC_ARG_WITH([arcus], AS_HELP_STRING([--without-arcus], [Build without support for libArcus]))
 

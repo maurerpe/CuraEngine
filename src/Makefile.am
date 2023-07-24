@@ -2,7 +2,7 @@ AM_CPPFLAGS = -I../include @ARCUS_CPPFLAGS@ -I@builddir@
 AM_CXXFLAGS = -std=c++20 @FMT_CFLAGS@ @PROTOBUF_CFLAGS@
 
 dist_noinst_DATA = ../Cura.proto
-MOSTLYCLEANFILES =
+MOSTLYCLEANFILES = Cura.pb.cc Cura.ph.h
 BUILT_SOURCES =
 
 bin_PROGRAMS = CuraEngine
@@ -111,7 +111,6 @@ CuraEngine_SOURCES = \
 	Scene.cpp
 if ARCUS
 CuraEngine_SOURCES += @builddir@/Cura.pb.cc
-MOSTLYCLEANFILES += Cura.pb.cc Cura.ph.h
 BUILT_SOURCES += Cura.pb.h
 endif
 
