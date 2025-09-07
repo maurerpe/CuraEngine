@@ -63,6 +63,11 @@ void FffGcodeWriter::setTargetStream(std::ostream* stream)
     gcode.setOutputStream(stream);
 }
 
+bool FffGcodeWriter::getExtruderActualUse(int extruder_nr)
+{
+    return gcode.getExtruderIsUsed(extruder_nr);
+}
+
 double FffGcodeWriter::getTotalFilamentUsed(int extruder_nr)
 {
     return gcode.getTotalFilamentUsed(extruder_nr);
@@ -343,6 +348,9 @@ static void retractionAndWipeConfigFromSettings(const Settings& settings, Retrac
 {
     RetractionConfig& retraction_config = config->retraction_config;
     retraction_config.distance = (settings.get<bool>("retraction_enable")) ? settings.get<double>("retraction_amount") : 0; // Retraction distance in mm.
+    retraction_config.retract_during_travel = settings.get<Ratio>("retraction_during_travel_ratio");
+    retraction_config.keep_retracting_during_travel = settings.get<bool>("keep_retracting_during_travel");
+    retraction_config.prime_during_travel = settings.get<Ratio>("prime_during_travel_ratio");
     retraction_config.prime_volume = settings.get<double>("retraction_extra_prime_amount"); // Extra prime volume in mm^3.
     retraction_config.speed = settings.get<Velocity>("retraction_retract_speed");
     retraction_config.primeSpeed = settings.get<Velocity>("retraction_prime_speed");
@@ -1317,7 +1325,8 @@ bool FffGcodeWriter::getExtruderNeedPrimeBlobDuringFirstLayer(const SliceDataSto
     // check the settings if the prime blob is disabled
     if (need_prime_blob)
     {
-        const bool is_extruder_used_overall = storage.getExtrudersUsed()[extruder_nr];
+        const auto& used_extruders = storage.getExtrudersUsed();
+        const bool is_extruder_used_overall = extruder_nr < used_extruders.size() && used_extruders[extruder_nr];
         const bool extruder_prime_blob_enabled = storage.getExtruderPrimeBlobEnabled(extruder_nr);
 
         need_prime_blob = is_extruder_used_overall && extruder_prime_blob_enabled;
@@ -3316,7 +3325,8 @@ bool FffGcodeWriter::processInsets(
             disallowed_areas_for_seams,
             scarf_seam,
             smooth_speed,
-            gcode_layer.getSeamOverhangMask());
+            gcode_layer.getSeamOverhangMask(),
+            mesh.layers[gcode_layer.getLayerNr()].texture_data_provider_);
         added_something |= wall_orderer.addToLayer();
     }
     return added_something;
@@ -3402,9 +3412,6 @@ bool FffGcodeWriter::processSkinPart(
     const SkinPart& skin_part) const
 {
     bool added_something = false;
-
-    gcode_layer.mode_skip_agressive_merge_ = true;
-
     processRoofingFlooring(
         storage,
         gcode_layer,
@@ -3426,8 +3433,6 @@ bool FffGcodeWriter::processSkinPart(
         mesh.flooring_angles,
         added_something);
     processTopBottom(storage, gcode_layer, mesh, extruder_nr, mesh_config, skin_part, added_something);
-
-    gcode_layer.mode_skip_agressive_merge_ = false;
     return added_something;
 }
 

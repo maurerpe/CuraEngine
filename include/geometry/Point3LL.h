@@ -36,7 +36,7 @@ public:
 
     Point3LL(Point3LL&& point) = default;
     Point3LL(const Point3LL& point) = default;
-    Point3LL(const Point2LL& point);
+    Point3LL(const Point2LL& point, const coord_t z = 0);
 
     Point3LL& operator=(const Point3LL& point) = default;
     Point3LL& operator=(Point3LL&& point) = default;
@@ -192,7 +192,7 @@ inline Point3LL operator*(const T i, const Point3LL& rhs)
     return rhs * i;
 }
 
-inline Point3LL lerp(const Point3LL& a, const Point3LL& b, const double t)
+static Point3LL lerp(const Point3LL& a, const Point3LL& b, const double t)
 {
     return Point3LL(cura::lerp(a.x_, b.x_, t), cura::lerp(a.y_, b.y_, t), cura::lerp(a.z_, b.z_, t));
 }

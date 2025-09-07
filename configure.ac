@@ -39,6 +39,7 @@ AC_SUBST(PROTOBUF_CFLAGS)
 AC_CHECK_HEADERS([arpa/inet.h netinet/in.h stdint.h sys/socket.h sys/time.h unistd.h])
 AC_CHECK_HEADER(polyclipping/clipper.hpp,,AC_MSG_ERROR([Could not find Angus Johnson's clipper header]))
 AC_CHECK_HEADER(rapidjson/rapidjson.h,,AC_MSG_ERROR([Could not find rapidjson header]))
+AC_CHECK_HEADER(mapbox/geometry/wagyu/wagyu.hpp,,AC_MSG_ERROR([Could not find mapbox wagyu header]))
 AC_CHECK_HEADER(stb/stb_image.h,,AC_MSG_ERROR([Could not find stb header]))
 AC_CHECK_HEADER(spdlog/spdlog.h,,AC_MSG_ERROR([Could not find spdlog header]))
 AC_CHECK_HEADER([fmt/format.h],,AC_MSG_ERROR([Could not find libfmt header]))
@@ -48,11 +49,13 @@ AC_CHECK_HEADER(scripta/logger.h,,AC_MSG_ERROR([Could not find ultimaker scripta
 # Checks for typedefs, structures, and compiler characteristics.
 AC_CHECK_HEADER_STDBOOL
 AC_C_INLINE
+AC_C_RESTRICT
 AC_TYPE_INT16_T
 AC_TYPE_INT32_T
 AC_TYPE_INT64_T
-AC_C_RESTRICT
+AC_TYPE_PID_T
 AC_TYPE_SIZE_T
+AC_TYPE_UINT8_T
 AC_TYPE_UINT16_T
 AC_TYPE_UINT32_T
 AC_TYPE_UINT64_T
@@ -61,6 +64,7 @@ AC_CHECK_TYPES([ptrdiff_t])
 # Checks for library functions.
 AC_FUNC_ERROR_AT_LINE
 AC_FUNC_STRTOD
+AC_FUNC_FORK
 AC_CHECK_FUNCS([floor gettimeofday memset pow socket sqrt strrchr strstr strtol])
 
 AC_CONFIG_FILES([

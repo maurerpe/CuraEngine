@@ -30,6 +30,7 @@ _bin
 _obj
 x64/*
 out/*
+src/CuraEngine
 
 ## CMake files
 cmake_install.cmake
@@ -82,6 +83,8 @@ Makefile
 Makefile.in
 aclocal.m4
 autom4te.cache
+autoscan*.log
+configure.scan
 compile
 config.h
 config.h.in
