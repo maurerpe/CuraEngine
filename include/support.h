@@ -1,17 +1,24 @@
-//Copyright (c) 2018 Ultimaker B.V.
-//CuraEngine is released under the terms of the AGPLv3 or higher.
+// Copyright (c) 2023 UltiMaker
+// CuraEngine is released under the terms of the AGPLv3 or higher
 
 #ifndef SUPPORT_H
 #define SUPPORT_H
 
+#include <cstddef>
+#include <vector>
+
+#include "settings/types/LayerIndex.h"
+#include "utils/Coord_t.h"
+
 namespace cura
 {
 
-struct LayerIndex;
 class Settings;
 class SliceDataStorage;
 class SliceMeshStorage;
 class Slicer;
+class Polygon;
+class Shape;
 
 class AreaSupport
 {
@@ -19,7 +26,7 @@ public:
     /*!
      * \brief Move support mesh outlines from slicer data into the support
      * storage.
-     * 
+     *
      * \param[out] storage Where to store the support areas.
      * \param mesh_settings Where to get the settings from what kind of support
      * mesh it is.
@@ -69,7 +76,7 @@ private:
      * \param global_support_areas_per_layer the global support areas per layer
      * \param total_layer_count total number of layers
      */
-    static void splitGlobalSupportAreasIntoSupportInfillParts(SliceDataStorage& storage, const std::vector<Polygons>& global_support_areas_per_layer, unsigned int total_layer_count);
+    static void splitGlobalSupportAreasIntoSupportInfillParts(SliceDataStorage& storage, const std::vector<Shape>& global_support_areas_per_layer, unsigned int total_layer_count);
 
     /*!
      * Generate gradual support on the already generated support areas. This must be called after generateSupportAreas().
@@ -100,11 +107,11 @@ private:
 
     /*!
      * \brief Combines the support infill of multiple layers.
-     * 
+     *
      * The support infill layers are combined while the thickness of each layer is
      * multiplied such that the infill should fill up again to the full height of
      * all combined layers.
-     * 
+     *
      * \param storage data storage containing the input layer outline data and containing the output support storage per layer
      */
     static void combineSupportInfillLayers(SliceDataStorage& storage);
@@ -133,7 +140,7 @@ private:
      * meshes with drop down and once for all support meshes without drop down.
      * The \p mesh_idx should then correspond to an empty \ref SliceMeshStorage
      * of one support mesh with the given value of support_mesh_drop_down.
-     * 
+     *
      * \param storage Data storage containing the input layer outline data.
      * \param infill_settings The settings which are based on the infill of the
      * support.
@@ -145,7 +152,14 @@ private:
      * areas.
      * \param layer_count Total number of layers.
      */
-    static void generateSupportAreasForMesh(SliceDataStorage& storage, const Settings& infill_settings, const Settings& roof_settings, const Settings& bottom_settings, const size_t mesh_idx, const size_t layer_count, std::vector<Polygons>& support_areas);
+    static void generateSupportAreasForMesh(
+        SliceDataStorage& storage,
+        const Settings& infill_settings,
+        const Settings& roof_settings,
+        const Settings& bottom_settings,
+        const size_t mesh_idx,
+        const size_t layer_count,
+        std::vector<Shape>& support_areas);
 
     /*!
      * Generate support bottom areas for a given mesh.
@@ -159,7 +173,7 @@ private:
      * \param mesh The mesh to generate support for.
      * \param global_support_areas_per_layer the global support areas on each layer.
      */
-    static void generateSupportBottom(SliceDataStorage& storage, const SliceMeshStorage& mesh, std::vector<Polygons>& global_support_areas_per_layer);
+    static void generateSupportBottom(SliceDataStorage& storage, const SliceMeshStorage& mesh, std::vector<Shape>& global_support_areas_per_layer);
 
     /*!
      * Generate support roof areas for a given mesh.
@@ -173,7 +187,7 @@ private:
      * \param mesh The mesh to generate support roof for.
      * \param global_support_areas_per_layer the global support areas on each layer.
      */
-    static void generateSupportRoof(SliceDataStorage& storage, const SliceMeshStorage& mesh, std::vector<Polygons>& global_support_areas_per_layer);
+    static void generateSupportRoof(SliceDataStorage& storage, const SliceMeshStorage& mesh, std::vector<Shape>& global_support_areas_per_layer);
 
     /*!
      * \brief Generate a single layer of support interface.
@@ -192,7 +206,13 @@ private:
      * \param minimum_interface_area Minimum area size for resulting interface polygons.
      * \param[out] interface_polygons The resulting interface layer. Do not use `interface` in windows!
      */
-    static void generateSupportInterfaceLayer(Polygons& support_areas, const Polygons mesh_outlines, const coord_t safety_offset, const coord_t outline_offset, const double minimum_interface_area, Polygons& interface_polygons);
+    static void generateSupportInterfaceLayer(
+        Shape& support_areas,
+        const Shape mesh_outlines,
+        const coord_t safety_offset,
+        const coord_t outline_offset,
+        const double minimum_interface_area,
+        Shape& interface_polygons);
 
     /*!
      * \brief Join current support layer with the support of the layer above,
@@ -200,29 +220,33 @@ private:
      * \param storage Where to store the resulting support.
      * \param supportLayer_up The support areas the layer above.
      * \param supportLayer_this The overhang areas of the current layer at hand.
-     * \param smoothing_distance Maximal distance in the X/Y directions of a
-     * line segment which is to be smoothed out.
      * \return The joined support areas for this layer.
      */
-    static Polygons join(const SliceDataStorage& storage, const Polygons& supportLayer_up, Polygons& supportLayer_this, const coord_t smoothing_distance);
+    static Shape join(const SliceDataStorage& storage, const Shape& supportLayer_up, Shape& supportLayer_this);
 
     /*!
      * Move the support up from model (cut away polygons to ensure bottom z distance)
      * and apply stair step transformation.
-     * 
+     *
      * If the bottom stairs defined only by the step height are too wide,
      * the top half of the step will be as wide as the stair step width
      * and the bottom half will follow the model.
-     * 
+     *
      * \param storage Where to get model outlines from
-     * \param[in,out] stair_removal The polygons to be removed for stair stepping on the current layer (input) and for the next layer (output). Only changed every [step_height] layers.
-     * \param[in,out] support_areas The support areas before and after this function
-     * \param layer_idx The layer number of the support layer we are processing
-     * \param bottom_empty_layer_count The number of empty layers between the bottom of support and the top of the model on which support rests
-     * \param bottom_stair_step_layer_count The max height (in nr of layers) of the support bottom stairs
-     * \param support_bottom_stair_step_width The max width of the support bottom stairs
+     * \param[in,out] stair_removal The polygons to be removed for stair stepping on the current layer (input) and for the next layer (output). Only changed every [step_height]
+     * layers. \param[in,out] support_areas The support areas before and after this function \param layer_idx The layer number of the support layer we are processing \param
+     * bottom_empty_layer_count The number of empty layers between the bottom of support and the top of the model on which support rests \param bottom_stair_step_layer_count The
+     * max height (in nr of layers) of the support bottom stairs \param support_bottom_stair_step_width The max width of the support bottom stairs
      */
-    static void moveUpFromModel(const SliceDataStorage& storage, Polygons& stair_removal, Polygons& sloped_areas, Polygons& support_areas, const size_t layer_idx, const size_t bottom_empty_layer_count, const size_t bottom_stair_step_layer_count, const coord_t support_bottom_stair_step_width);
+    static void moveUpFromModel(
+        const SliceDataStorage& storage,
+        Shape& stair_removal,
+        Shape& sloped_areas,
+        Shape& support_areas,
+        const size_t layer_idx,
+        const size_t bottom_empty_layer_count,
+        const size_t bottom_stair_step_layer_count,
+        const coord_t support_bottom_stair_step_width);
 
     /*!
      * Joins the layer part outlines of all meshes and collects the overhang
@@ -231,26 +255,26 @@ private:
      * \param mesh Output mesh to store the resulting overhang points in.
      */
     static void detectOverhangPoints(const SliceDataStorage& storage, SliceMeshStorage& mesh);
-    
+
     /*!
      * \brief Compute the basic overhang and full overhang of a layer.
      *
      * The basic overhang consists of the parts of this layer which are too far
      * away from the layer below to be supported. The full overhang consists of
      * the basic overhang extended toward the border of the layer below.
-     * 
+     *
      *             layer 2
      * layer 1 ______________|
      * _______|         ^^^^^ basic overhang
      *         ^^^^^^^^^^^^^^ full overhang
-     * 
+     *
      * \param storage The slice data storage.
      * \param mesh The mesh for which to compute the basic overhangs.
      * \param layer_idx The layer for which to compute the overhang.
      * \return A pair of basic overhang and full overhang.
      */
-    static std::pair<Polygons, Polygons> computeBasicAndFullOverhang(const SliceDataStorage& storage, const SliceMeshStorage& mesh, const unsigned int layer_idx);
-    
+    static std::pair<Shape, Shape> computeBasicAndFullOverhang(const SliceDataStorage& storage, const SliceMeshStorage& mesh, const LayerIndex& layer_idx);
+
     /*!
      * \brief Adds tower pieces to the current support layer.
      *
@@ -267,29 +291,28 @@ private:
      */
     static void handleTowers(
         const Settings& settings,
-        const Polygons& xy_disallowed_area,
-        Polygons& supportLayer_this,
-        std::vector<Polygons>& tower_roofs,
-        std::vector<std::vector<Polygons>>& overhang_points,
+        const Shape& xy_disallowed_area,
+        Shape& supportLayer_this,
+        std::vector<Shape>& tower_roofs,
+        std::vector<std::vector<Shape>>& overhang_points,
         LayerIndex layer_idx,
-        size_t layer_count
-    );
-    
+        size_t layer_count);
+
     /*!
      * \brief Adds struts (towers against a wall) to the current layer.
      * \param settings The settings to use to create the wall struts.
      * \param supportLayer_this The areas of the layer for which to handle the
      * wall struts.
      */
-    static void handleWallStruts(const Settings& settings, Polygons& supportLayer_this);
+    static void handleWallStruts(const Settings& settings, Shape& supportLayer_this);
 
     /*!
      * Clean up the SupportInfillParts.
      * Remove parts which have nothing to be printed.
-     * 
+     *
      * Remove parts which are too small for the first wall.
      * For parts without walls: remove if combined into upper layers.
-     * 
+     *
      */
     static void cleanup(SliceDataStorage& storage);
 
@@ -298,14 +321,13 @@ private:
      * generates varying xy disallowed areas for \param layer_idx where the offset distance is dependent on the wall angle
      *
      * \param storage Data storage containing the input layer data and
-     * \param settings The settings to use to calculate the offsets
      * \param layer_idx The layer for which the disallowed areas are to be calcualted
      *
      */
-    static Polygons generateVaryingXYDisallowedArea(const SliceMeshStorage& storage, const Settings& infill_settings, const LayerIndex layer_idx);
+    static Shape generateVaryingXYDisallowedArea(const SliceMeshStorage& storage, const LayerIndex layer_idx);
 };
 
 
-}//namespace cura
+} // namespace cura
 
-#endif//SUPPORT_H
+#endif // SUPPORT_H

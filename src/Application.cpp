@@ -1,4 +1,4 @@
-// Copyright (c) 2023 UltiMaker
+// Copyright (c) 2024 UltiMaker
 // CuraEngine is released under the terms of the AGPLv3 or higher
 
 #include "Application.h"
@@ -7,18 +7,21 @@
 #include <memory>
 #include <string>
 
+#include <boost/uuid/random_generator.hpp> //For generating a UUID.
+#include <boost/uuid/uuid_io.hpp> //For generating a UUID.
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <spdlog/cfg/helpers.h>
+#include <spdlog/details/os.h>
+#include <spdlog/details/registry.h>
 #include <spdlog/sinks/dup_filter_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
-#include <spdlog/cfg/helpers.h>
-#include <spdlog/details/registry.h>
-#include <spdlog/details/os.h>
 
-#include "FffProcessor.h"
+#include "Slice.h"
 #include "communication/ArcusCommunication.h" //To connect via Arcus to the front-end.
 #include "communication/CommandLine.h" //To use the command line to slice stuff.
+#include "communication/EmscriptenCommunication.h" // To use Emscripten to slice stuff.
 #include "progress/Progress.h"
 #include "utils/ThreadPool.h"
 #include "utils/string.h" //For stringcasecompare.
@@ -27,23 +30,24 @@ namespace cura
 {
 
 Application::Application()
+    : instance_uuid_(boost::uuids::to_string(boost::uuids::random_generator()()))
 {
     auto dup_sink = std::make_shared<spdlog::sinks::dup_filter_sink_mt>(std::chrono::seconds{ 10 });
     auto base_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     dup_sink->add_sink(base_sink);
 
-    spdlog::default_logger()->sinks() = std::vector<std::shared_ptr<spdlog::sinks::sink>>{ dup_sink }; // replace default_logger sinks with the duplicating filtering sink to avoid spamming
+    spdlog::default_logger()->sinks()
+        = std::vector<std::shared_ptr<spdlog::sinks::sink>>{ dup_sink }; // replace default_logger sinks with the duplicating filtering sink to avoid spamming
 
     if (auto spdlog_val = spdlog::details::os::getenv("CURAENGINE_LOG_LEVEL"); ! spdlog_val.empty())
     {
         spdlog::cfg::helpers::load_levels(spdlog_val);
-    }
+    };
 }
 
 Application::~Application()
 {
-    delete communication;
-    delete thread_pool;
+    delete thread_pool_;
 }
 
 Application& Application::getInstance()
@@ -59,7 +63,7 @@ void Application::connect()
     int port = 49674;
 
     // Parse port number from IP address.
-    std::string ip_port(argv[2]);
+    std::string ip_port(argv_[2]);
     std::size_t found_pos = ip_port.find(':');
     if (found_pos != std::string::npos)
     {
@@ -69,9 +73,9 @@ void Application::connect()
 
     int n_threads;
 
-    for (size_t argn = 3; argn < argc; argn++)
+    for (size_t argn = 3; argn < argc_; argn++)
     {
-        char* str = argv[argn];
+        char* str = argv_[argn];
         if (str[0] == '-')
         {
             for (str++; *str; str++)
@@ -97,15 +101,15 @@ void Application::connect()
         }
     }
 
-    ArcusCommunication* arcus_communication = new ArcusCommunication();
+    auto arcus_communication = std::make_shared<ArcusCommunication>();
     arcus_communication->connect(ip, port);
-    communication = arcus_communication;
+    communication_ = arcus_communication;
 }
 #endif // ARCUS
 
 void Application::printCall() const
 {
-    spdlog::error("Command called: {}", *argv);
+    spdlog::error("Command called: {}", *argv_);
 }
 
 void Application::printHelp() const
@@ -126,7 +130,9 @@ void Application::printHelp() const
     fmt::print("  -v\n\tIncrease the verbose level (show log messages).\n");
     fmt::print("  -m<thread_count>\n\tSet the desired number of threads.\n");
     fmt::print("  -p\n\tLog progress information.\n");
+    fmt::print("  -d Add definition search paths seperated by a `:` (Unix) or `;` (Windows)\n");
     fmt::print("  -j\n\tLoad settings.def.json file to register all settings and their defaults.\n");
+    fmt::print("  -r\n\tLoad a json file containing resolved setting values.\n");
     fmt::print("  -s <setting>=<value>\n\tSet a setting to a value for the last supplied object, \n\textruder train, or general settings.\n");
     fmt::print("  -l <model_file>\n\tLoad an STL model. \n");
     fmt::print("  -g\n\tSwitch setting focus to the current mesh group only.\n\tUsed for one-at-a-time printing.\n");
@@ -135,17 +141,58 @@ void Application::printHelp() const
     fmt::print("  -o <output_file>\n\tSpecify a file to which to write the generated gcode.\n");
     fmt::print("\n");
     fmt::print("The settings are appended to the last supplied object:\n");
-    fmt::print("CuraEngine slice [general settings] \n\t-g [current group settings] \n\t-e0 [extruder train 0 settings] \n\t-l obj_inheriting_from_last_extruder_train.stl [object settings] \n\t--next [next group settings]\n\t... etc.\n");
+    fmt::print("CuraEngine slice [general settings] \n\t-g [current group settings] \n\t-e0 [extruder train 0 settings] \n\t-l obj_inheriting_from_last_extruder_train.stl [object "
+               "settings] \n\t--next [next group settings]\n\t... etc.\n");
     fmt::print("\n");
-    fmt::print("In order to load machine definitions from custom locations, you need to create the environment variable CURA_ENGINE_SEARCH_PATH, which should contain all search paths delimited by a (semi-)colon.\n");
+    fmt::print("In order to load machine definitions from custom locations, you need to create the environment variable CURA_ENGINE_SEARCH_PATH, which should contain all search "
+               "paths delimited by a (semi-)colon.\n");
     fmt::print("\n");
+}
+
+void Application::printHeader() const
+{
+    fmt::print("\n");
+    fmt::print("Cura_SteamEngine version {}\n", CURA_ENGINE_VERSION);
+
+#ifdef DEBUG
+    fmt::print("\n");
+    fmt::print(" _______   ________  _______   __    __   ______\n");
+    fmt::print("/       \\ /        |/       \\ /  |  /  | /      \\\n");
+    fmt::print("███████  |████████/ ███████  |██ |  ██ |/██████  |\n");
+    fmt::print("██ |  ██ |██ |__    ██ |__██ |██ |  ██ |██ | _██/\n");
+    fmt::print("██ |  ██ |██    |   ██    ██< ██ |  ██ |██ |/    |\n");
+    fmt::print("██ |  ██ |█████/    ███████  |██ |  ██ |██ |████ |\n");
+    fmt::print("██ |__██ |██ |_____ ██ |__██ |██ \\__██ |██ \\__██ |\n");
+    fmt::print("██    ██/ ██       |██    ██/ ██    ██/ ██    ██/\n");
+    fmt::print("███████/  ████████/ ███████/   ██████/   ██████/\n");
+    fmt::print("\n");
+    fmt::print(" __       __   ______   _______   ________\n");
+    fmt::print("/  \\     /  | /      \\ /       \\ /        |\n");
+    fmt::print("██  \\   /██ |/██████  |███████  |████████/\n");
+    fmt::print("███  \\ /███ |██ |  ██ |██ |  ██ |██ |__\n");
+    fmt::print("████  /████ |██ |  ██ |██ |  ██ |██    |\n");
+    fmt::print("██ ██ ██/██ |██ |  ██ |██ |  ██ |█████/\n");
+    fmt::print("██ |███/ ██ |██ \\__██ |██ |__██ |██ |_____\n");
+    fmt::print("██ | █/  ██ |██    ██/ ██    ██/ ██       |\n");
+    fmt::print("██/      ██/  ██████/  ███████/  ████████/\n");
+    fmt::print("\n");
+
+    fmt::print("#########################################################\n");
+    fmt::print("#########################################################\n");
+    fmt::print("## WARNING: This version of CuraEngine has been built  ##\n");
+    fmt::print("## in developper mode. This may impact performances,   ##\n");
+    fmt::print("## provoke unexpected results or crashes.              ##\n");
+    fmt::print("## If you downloaded an official version of CuraEngine ##\n");
+    fmt::print("## and see this message, please report the issue.      ##\n");
+    fmt::print("#########################################################\n");
+    fmt::print("#########################################################\n");
+#endif
 }
 
 void Application::printLicense() const
 {
     fmt::print("\n");
-    fmt::print("Cura_SteamEngine version {}\n", CURA_ENGINE_VERSION);
-    fmt::print("Copyright (C) 2022 Ultimaker\n");
+    fmt::print("Copyright (C) 2024 Ultimaker\n");
     fmt::print("\n");
     fmt::print("This program is free software: you can redistribute it and/or modify\n");
     fmt::print("it under the terms of the GNU Affero General Public License as published by\n");
@@ -164,19 +211,23 @@ void Application::printLicense() const
 void Application::slice()
 {
     std::vector<std::string> arguments;
-    for (size_t argument_index = 0; argument_index < argc; argument_index++)
+    for (size_t argument_index = 0; argument_index < argc_; argument_index++)
     {
-        arguments.emplace_back(argv[argument_index]);
+        arguments.emplace_back(argv_[argument_index]);
     }
-
-    communication = new CommandLine(arguments);
+#ifdef __EMSCRIPTEN__
+    communication_ = std::make_shared<EmscriptenCommunication>(arguments);
+#else
+    communication_ = std::make_shared<CommandLine>(arguments);
+#endif
 }
 
 void Application::run(const size_t argc, char** argv)
 {
-    this->argc = argc;
-    this->argv = argv;
+    argc_ = argc;
+    argv_ = argv;
 
+    printHeader();
     printLicense();
     Progress::init();
 
@@ -209,7 +260,7 @@ void Application::run(const size_t argc, char** argv)
             exit(1);
         }
 
-    if (! communication)
+    if (! communication_)
     {
         // No communication channel is open any more, so either:
         //- communication failed to connect, or
@@ -218,9 +269,9 @@ void Application::run(const size_t argc, char** argv)
         exit(0);
     }
     startThreadPool(); // Start the thread pool
-    while (communication->hasSlice())
+    while (communication_->hasSlice())
     {
-        communication->sliceNext();
+        communication_->sliceNext();
     }
 }
 
@@ -229,7 +280,7 @@ void Application::startThreadPool(int nworkers)
     size_t nthreads;
     if (nworkers <= 0)
     {
-        if (thread_pool)
+        if (thread_pool_)
         {
             return; // Keep the previous ThreadPool
         }
@@ -239,12 +290,12 @@ void Application::startThreadPool(int nworkers)
     {
         nthreads = nworkers - 1; // Minus one for the main thread
     }
-    if (thread_pool && thread_pool->thread_count() == nthreads)
+    if (thread_pool_ && thread_pool_->thread_count() == nthreads)
     {
         return; // Keep the previous ThreadPool
     }
-    delete thread_pool;
-    thread_pool = new ThreadPool(nthreads);
+    delete thread_pool_;
+    thread_pool_ = new ThreadPool(nthreads);
 }
 
 } // namespace cura

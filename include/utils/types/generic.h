@@ -1,4 +1,4 @@
-// Copyright (c) 2023 UltiMaker
+// Copyright (c) 2024 UltiMaker
 // CuraEngine is released under the terms of the AGPLv3 or higher
 
 #ifndef CURAENGINE_GENERIC_H
@@ -8,6 +8,8 @@
 #include <functional>
 #include <type_traits>
 
+#include <range/v3/range/concepts.hpp>
+
 namespace cura::utils
 {
 // clang-format off
@@ -15,6 +17,14 @@ template<typename T>
 concept hashable = requires(T value)
 {
     { std::hash<T>{}(value) } -> concepts::convertible_to<std::size_t>;
+};
+
+template<typename T>
+concept grpc_convertable = requires(T value)
+{
+    requires ranges::semiregular<T>;
+    requires ranges::semiregular<typename T::value_type>;
+    requires ranges::semiregular<typename T::native_value_type>;
 };
 
 #ifdef OLDER_APPLE_CLANG
@@ -41,10 +51,7 @@ concept integral =
     std::is_same_v<Tp, unsigned long long>;
 
 template<typename Tp>
-concept floating_point =
-    std::is_same_v<Tp, float> ||
-    std::is_same_v<Tp, double> ||
-    std::is_same_v<Tp, long double>;
+concept floating_point = std::is_same_v<Tp, float> || std::is_same_v<Tp, double> || std::is_same_v<Tp, long double>;
 #else
 template<typename Tp>
 concept integral = std::integral<Tp>;
@@ -53,6 +60,15 @@ template<typename Tp>
 concept floating_point = std::floating_point<Tp>;
 #endif
 // clang-format on
+
+template<typename Tp>
+concept numeric = std::is_arithmetic_v<std::remove_cvref_t<Tp>>;
+
+template<typename T>
+concept multipliable = requires(T a, T b)
+{
+    { a * b };
+};
 } // namespace cura::utils
 
 #endif // CURAENGINE_GENERIC_H

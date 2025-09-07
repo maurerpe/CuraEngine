@@ -1,18 +1,20 @@
-//Copyright (c) 2018 Ultimaker B.V.
-//CuraEngine is released under the terms of the AGPLv3 or higher.
+// Copyright (c) 2023 UltiMaker
+// CuraEngine is released under the terms of the AGPLv3 or higher
 
 #ifndef TOPSURFACE_H
 #define TOPSURFACE_H
 
-#include "utils/polygon.h" //For the polygon areas.
+#include "GCodePathConfig.h"
+#include "geometry/Shape.h"
 
 namespace cura
 {
 
-class GCodePathConfig;
 class FffGcodeWriter;
 class LayerPlan;
+class SliceDataStorage;
 class SliceMeshStorage;
+class SliceDataStorage;
 
 class TopSurface
 {
@@ -56,9 +58,9 @@ public:
     /*!
      * \brief The areas of top surface, for each layer.
      */
-    Polygons areas;
+    Shape areas;
 };
 
-}
+} // namespace cura
 
 #endif /* TOPSURFACE_H */

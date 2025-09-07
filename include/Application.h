@@ -1,18 +1,24 @@
-//Copyright (c) 2018 Ultimaker B.V.
-//CuraEngine is released under the terms of the AGPLv3 or higher.
+// Copyright (c) 2023 UltiMaker
+// CuraEngine is released under the terms of the AGPLv3 or higher
 
 #ifndef APPLICATION_H
 #define APPLICATION_H
 
-#include "utils/NoCopy.h"
-#include <cstddef> //For size_t.
 #include <cassert>
+#include <cstddef>
+#include <memory>
+#include <string>
+
+#include "utils/NoCopy.h"
+
 
 namespace cura
 {
 class Communication;
 class Slice;
 class ThreadPool;
+
+struct PluginSetupConfiguration;
 
 /*!
  * A singleton class that serves as the starting point for all slicing.
@@ -33,19 +39,21 @@ public:
      * can assume that it is safe to access this without checking whether it is
      * initialised.
      */
-    Communication* communication = nullptr;
+    std::shared_ptr<Communication> communication_;
 
     /*
      * \brief The slice that is currently ongoing.
      *
      * If no slice has started yet, this will be a nullptr.
      */
-    Slice* current_slice = nullptr;
+    std::shared_ptr<Slice> current_slice_;
 
     /*!
      * \brief ThreadPool with lifetime tied to Application
      */
-    ThreadPool* thread_pool = nullptr;
+    ThreadPool* thread_pool_ = nullptr;
+
+    std::string instance_uuid_;
 
     /*!
      * Gets the instance of this application class.
@@ -85,7 +93,7 @@ public:
      *
      * \param nworkers The number of workers (including the main thread) that are ran.
      */
-    void startThreadPool(int nworkers=0);
+    void startThreadPool(int nworkers = 0);
 
 protected:
 #ifdef ARCUS
@@ -95,10 +103,15 @@ protected:
      * \param argv The arguments provided to the application.
      */
     void connect();
-#endif //ARCUS
+#endif // ARCUS
 
     /*!
-     * \brief Print the header and license to the stderr channel.
+     * \brief Print the header to the stderr channel.
+     */
+    void printHeader() const;
+
+    /*!
+     * \brief Print the license to the stderr channel.
      */
     void printLicense() const;
 
@@ -113,13 +126,13 @@ private:
     /*
      * \brief The number of arguments that the application was called with.
      */
-    size_t argc;
+    size_t argc_;
 
     /*
      * \brief An array of C strings containing the arguments that the
      * application was called with.
      */
-    char** argv;
+    char** argv_;
 
     /*!
      * \brief Constructs a new Application instance.
@@ -134,8 +147,10 @@ private:
      * This destroys the Communication instance along with it.
      */
     ~Application();
+
+    void registerPlugins(const PluginSetupConfiguration& plugins_config);
 };
 
-} //Cura namespace.
+} // namespace cura
 
-#endif //APPLICATION_H
+#endif // APPLICATION_H

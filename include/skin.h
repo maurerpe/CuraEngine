@@ -1,16 +1,18 @@
-//Copyright (c) 2021 Ultimaker B.V.
-//CuraEngine is released under the terms of the AGPLv3 or higher.
+// Copyright (c) 2021 Ultimaker B.V.
+// CuraEngine is released under the terms of the AGPLv3 or higher.
 
 #ifndef SKIN_H
 #define SKIN_H
 
+#include <optional>
+
 #include "settings/types/LayerIndex.h"
 #include "utils/Coord_t.h"
 
-namespace cura 
+namespace cura
 {
 
-class Polygons;
+class Shape;
 class SkinPart;
 class SliceLayerPart;
 class SliceMeshStorage;
@@ -21,10 +23,9 @@ class SliceMeshStorage;
 class SkinInfillAreaComputation
 {
 public:
-
     /*!
      * \brief Initialize the parameters for skin and infill area computation.
-     * 
+     *
      * \param layer_nr The index of the layer for which to generate the skins
      * and infill.
      * \param mesh The storage where the layer outline information (input) is
@@ -41,11 +42,11 @@ public:
 
     /*!
      * \brief Combines the infill of multiple layers for a specified mesh.
-     * 
+     *
      * The infill layers are combined while the thickness of each layer is
      * multiplied such that the infill should fill up again to the full height of
      * all combined layers.
-     * 
+     *
      * \param mesh The mesh to combine the infill layers of.
      */
     static void combineInfillLayers(SliceMeshStorage& mesh);
@@ -69,10 +70,10 @@ public:
 
     /*!
      * Limit the infill areas to places where they support internal overhangs.
-     * 
+     *
      * This function uses the part.infill_area and part.infill_area_own
      * and computes a new part.infill_area_own
-     * 
+     *
      * \param mesh The mesh for which to recalculate the infill areas
      */
     static void generateInfillSupport(SliceMeshStorage& mesh);
@@ -85,7 +86,7 @@ protected:
 
     /*!
      * Generate the skin areas (outlines) of one part in a layer
-     * 
+     *
      * \param part The part for which to generate skins.
      */
     void generateSkinAndInfillAreas(SliceLayerPart& part);
@@ -97,7 +98,7 @@ protected:
      * above. The input is the area within the inner walls (or an empty Polygons
      * object).
      */
-    void calculateTopSkin(const SliceLayerPart& part, Polygons& upskin);
+    void calculateTopSkin(const SliceLayerPart& part, Shape& upskin);
 
     /*!
      * \brief Calculate the basic areas which have air below.
@@ -106,18 +107,18 @@ protected:
      * layers above. The input is the area within the inner walls (or an empty
      * Polygons object).
      */
-    void calculateBottomSkin(const SliceLayerPart& part, Polygons& downskin);
+    void calculateBottomSkin(const SliceLayerPart& part, Shape& downskin);
 
     /*!
      * Apply skin expansion:
      * expand skins into infill area
      * where the skin is broad enough
-     * 
+     *
      * \param original_outline The outline within which skin and infill lie (inner bounds of innermost walls)
      * \param[in,out] upskin The top skin areas to grow
      * \param[in,out] downskin The bottom skin areas to grow
      */
-    void applySkinExpansion(const Polygons& original_outline, Polygons& upskin, Polygons& downskin);
+    void applySkinExpansion(const Shape& original_outline, Shape& upskin, Shape& downskin);
 
     /*!
      * Generate infill of a given part
@@ -125,25 +126,20 @@ protected:
      * where the infill areas (output) are stored.
      * \param skin The skin areas on the layer of the \p part
      */
-    void generateInfill(SliceLayerPart& part, const Polygons& skin);
+    void generateInfill(SliceLayerPart& part);
 
     /*!
-     * Remove the areas which are 'directly' under air from the \ref SkinPart::inner_infill and 
-     * save them in the \ref SkinPart::roofing_fill of the \p part.
-     * 
-     * \param[in,out] part Where to get the SkinParts to get the outline info from and to store the roofing areas
-     */
-    void generateRoofingFillAndSkinFill(SliceLayerPart& part);
-
-    /*!
-     * Remove the areas which are directly under air in the top-most surface and directly above air in bottom-most
-     * surfaces from the \ref SkinPart::inner_infill and save them in the \ref SkinPart::bottom_most_surface_fill and
-     * \ref SkinPart::top_most_surface_fill (respectively) of the \p part.
+     * Remove the areas which are 'directly' under/over air from the \ref SkinPart::inner_infill and
+     * save them in the \ref SkinPart::roofing_fill and \ref SkinPart::flooring_fill of the \p part.
      *
-     * \param[in,out] part Where to get the SkinParts to get the outline info from and to store the top and bottom-most
-     * infill areas
+     * \param[in,out] part Where to get the SkinParts to get the outline info from and to store the roofing/flooring areas
      */
-    void generateTopAndBottomMostSkinFill(SliceLayerPart& part);
+    void generateSkinRoofingFlooringFill(SliceLayerPart& part);
+
+    /*!
+     * Generate the top and bottom-most surfaces of the given \p part, i.e. the surfaces that have nothing above or below
+     */
+    void generateTopAndBottomMostSurfaces(SliceLayerPart& part);
 
     /*!
      * Helper function to calculate and return the areas which are 'directly' under air.
@@ -151,32 +147,34 @@ protected:
      * \param part Where to get the SkinParts to get the outline info from
      * \param roofing_layer_count The number of layers above the layer which we are looking into
      */
-    Polygons generateFilledAreaAbove(SliceLayerPart& part, size_t roofing_layer_count);
+    Shape generateFilledAreaAbove(SliceLayerPart& part, size_t roofing_layer_count);
 
     /*!
      * Helper function to calculate and return the areas which are 'directly' above air.
      *
      * \param part Where to get the SkinParts to get the outline info from
      * \param flooring_layer_count The number of layers below the layer which we are looking into
+     * \return The area that contains mesh parts below, or nullopt if the build plate is below, which actually means everything is considered supported
      */
-    Polygons generateFilledAreaBelow(SliceLayerPart& part, size_t flooring_layer_count);
+    std::optional<Shape> generateFilledAreaBelow(SliceLayerPart& part, size_t flooring_layer_count);
 
 protected:
-    LayerIndex layer_nr; //!< The index of the layer for which to generate the skins and infill.
-    SliceMeshStorage& mesh; //!< The storage where the layer outline information (input) is stored and where the skin insets and fill areas (output) are stored.
-    size_t bottom_layer_count; //!< The number of layers of bottom skin
-    size_t initial_bottom_layer_count; //!< Whether to make bottom skin for the initial layer
-    size_t top_layer_count; //!< The number of layers of top skin
-    size_t wall_line_count; //!< The number of walls, i.e. the number of the wall from which to offset.
-    coord_t skin_line_width; //!< The line width of the skin.
-    size_t skin_inset_count; //!< The number of perimeters to surround the skin
-    bool no_small_gaps_heuristic; //!< A heuristic which assumes there will be no small gaps between bottom and top skin with a z size smaller than the skin size itself
-    bool process_infill; //!< Whether to process infill, i.e. whether there's a positive infill density or there are infill meshes modifying this mesh.
+    LayerIndex layer_nr_; //!< The index of the layer for which to generate the skins and infill.
+    SliceMeshStorage& mesh_; //!< The storage where the layer outline information (input) is stored and where the skin insets and fill areas (output) are stored.
+    size_t bottom_layer_count_; //!< The number of layers of bottom skin
+    size_t initial_bottom_layer_count_; //!< Whether to make bottom skin for the initial layer
+    size_t top_layer_count_; //!< The number of layers of top skin
+    size_t wall_line_count_; //!< The number of walls, i.e. the number of the wall from which to offset.
+    coord_t skin_line_width_; //!< The line width of the skin.
+    size_t skin_inset_count_; //!< The number of perimeters to surround the skin
+    bool no_small_gaps_heuristic_; //!< A heuristic which assumes there will be no small gaps between bottom and top skin with a z size smaller than the skin size itself
+    bool process_infill_; //!< Whether to process infill, i.e. whether there's a positive infill density or there are infill meshes modifying this mesh.
 
-    coord_t top_skin_preshrink; //!< The top skin removal width, to remove thin strips of skin along nearly-vertical walls.
-    coord_t bottom_skin_preshrink; //!< The bottom skin removal width, to remove thin strips of skin along nearly-vertical walls.
-    coord_t top_skin_expand_distance; //!< The distance by which the top skins should be larger than the original top skins.
-    coord_t bottom_skin_expand_distance; //!< The distance by which the bottom skins should be larger than the original bottom skins.
+    coord_t top_skin_preshrink_; //!< The top skin removal width, to remove thin strips of skin along nearly-vertical walls.
+    coord_t bottom_skin_preshrink_; //!< The bottom skin removal width, to remove thin strips of skin along nearly-vertical walls.
+    coord_t top_skin_expand_distance_; //!< The distance by which the top skins should be larger than the original top skins.
+    coord_t bottom_skin_expand_distance_; //!< The distance by which the bottom skins should be larger than the original bottom skins.
+
 private:
     static coord_t getSkinLineWidth(const SliceMeshStorage& mesh, const LayerIndex& layer_nr); //!< Compute the skin line width, which might be different for the first layer.
 
@@ -191,9 +189,9 @@ private:
      * \param part_here The part for which to check.
      * \param layer2_nr The layer index from which to gather the outlines.
      */
-    Polygons getOutlineOnLayer(const SliceLayerPart& part_here, const LayerIndex layer2_nr);
+    Shape getOutlineOnLayer(const SliceLayerPart& part_here, const LayerIndex layer2_nr);
 };
 
-}//namespace cura
+} // namespace cura
 
-#endif//SKIN_H
+#endif // SKIN_H

@@ -3,24 +3,30 @@
 
 #ifdef ARCUS
 
+#include "communication/ArcusCommunicationPrivate.h"
+
 #include <spdlog/spdlog.h>
 
 #include "Application.h"
 #include "ExtruderTrain.h"
 #include "Slice.h"
-#include "communication/ArcusCommunicationPrivate.h"
 #include "settings/types/LayerIndex.h"
-#include "utils/FMatrix4x3.h" //To convert vertices to integer-points.
-#include "utils/floatpoint.h" //To accept vertices (which are provided in floating point).
+#include "utils/Matrix4x3D.h" //To convert vertices to integer-points.
+#include "utils/Point3F.h" //To accept vertices (which are provided in floating point).
 
 namespace cura
 {
 
-ArcusCommunication::Private::Private() : socket(nullptr), object_count(0), last_sent_progress(-1), slice_count(0), millisecUntilNextTry(100)
+ArcusCommunication::Private::Private()
+    : socket(nullptr)
+    , object_count(0)
+    , last_sent_progress(-1)
+    , slice_count(0)
+    , millisecUntilNextTry(100)
 {
 }
 
-std::shared_ptr<proto::LayerOptimized> ArcusCommunication::Private::getOptimizedLayerById(LayerIndex layer_nr)
+std::shared_ptr<proto::LayerOptimized> ArcusCommunication::Private::getOptimizedLayerById(LayerIndex::value_type layer_nr)
 {
     layer_nr += optimized_layers.current_layer_offset;
     std::unordered_map<int, std::shared_ptr<proto::LayerOptimized>>::iterator find_result = optimized_layers.slice_data.find(layer_nr);
@@ -41,7 +47,7 @@ std::shared_ptr<proto::LayerOptimized> ArcusCommunication::Private::getOptimized
 
 void ArcusCommunication::Private::readGlobalSettingsMessage(const proto::SettingList& global_settings_message)
 {
-    Slice* slice = Application::getInstance().current_slice;
+    auto slice = Application::getInstance().current_slice_;
     for (const cura::proto::Setting& setting_message : global_settings_message.settings())
     {
         slice->scene.settings.add(setting_message.name(), setting_message.value());
@@ -51,7 +57,7 @@ void ArcusCommunication::Private::readGlobalSettingsMessage(const proto::Setting
 void ArcusCommunication::Private::readExtruderSettingsMessage(const google::protobuf::RepeatedPtrField<proto::Extruder>& extruder_messages)
 {
     // Make sure we have enough extruders added currently.
-    Slice* slice = Application::getInstance().current_slice;
+    auto slice = Application::getInstance().current_slice_;
     const size_t extruder_count = slice->scene.settings.get<size_t>("machine_extruder_count");
     for (size_t extruder_nr = 0; extruder_nr < extruder_count; extruder_nr++)
     {
@@ -67,10 +73,12 @@ void ArcusCommunication::Private::readExtruderSettingsMessage(const google::prot
             spdlog::warn("Received extruder index that is out of range: {}", extruder_nr);
             continue;
         }
-        ExtruderTrain& extruder = slice->scene.extruders[extruder_nr]; // Extruder messages may arrive out of order, so don't iteratively get the next extruder but take the extruder_nr from this message.
+        ExtruderTrain& extruder
+            = slice->scene
+                  .extruders[extruder_nr]; // Extruder messages may arrive out of order, so don't iteratively get the next extruder but take the extruder_nr from this message.
         for (const cura::proto::Setting& setting_message : extruder_message.settings().settings())
         {
-            extruder.settings.add(setting_message.name(), setting_message.value());
+            extruder.settings_.add(setting_message.name(), setting_message.value());
         }
     }
 }
@@ -82,7 +90,7 @@ void ArcusCommunication::Private::readMeshGroupMessage(const proto::ObjectList& 
         return; // Don't slice empty mesh groups.
     }
 
-    Scene& scene = Application::getInstance().current_slice->scene;
+    Scene& scene = Application::getInstance().current_slice_->scene;
     MeshGroup& mesh_group = scene.mesh_groups.at(object_count);
 
     // Load the settings in the mesh group.
@@ -91,10 +99,10 @@ void ArcusCommunication::Private::readMeshGroupMessage(const proto::ObjectList& 
         mesh_group.settings.add(setting.name(), setting.value());
     }
 
-    FMatrix4x3 matrix;
+    Matrix4x3D matrix;
     for (const cura::proto::Object& object : mesh_group_message.objects())
     {
-        const size_t bytes_per_face = sizeof(FPoint3) * 3; // 3 vectors per face.
+        const size_t bytes_per_face = sizeof(Point3F) * 3; // 3 vectors per face.
         const size_t face_count = object.vertices().size() / bytes_per_face;
 
         if (face_count <= 0)
@@ -109,24 +117,24 @@ void ArcusCommunication::Private::readMeshGroupMessage(const proto::ObjectList& 
         // Load the settings for the mesh.
         for (const cura::proto::Setting& setting : object.settings())
         {
-            mesh.settings.add(setting.name(), setting.value());
+            mesh.settings_.add(setting.name(), setting.value());
         }
-        ExtruderTrain& extruder = mesh.settings.get<ExtruderTrain&>("extruder_nr"); // Set the parent setting to the correct extruder.
-        mesh.settings.setParent(&extruder.settings);
+        ExtruderTrain& extruder = mesh.settings_.get<ExtruderTrain&>("extruder_nr"); // Set the parent setting to the correct extruder.
+        mesh.settings_.setParent(&extruder.settings_);
 
         for (size_t face = 0; face < face_count; face++)
         {
             const std::string data = object.vertices().substr(face * bytes_per_face, bytes_per_face);
-            const FPoint3* float_vertices = reinterpret_cast<const FPoint3*>(data.data());
+            const Point3F* float_vertices = reinterpret_cast<const Point3F*>(data.data());
 
-            Point3 verts[3];
-            verts[0] = matrix.apply(float_vertices[0]);
-            verts[1] = matrix.apply(float_vertices[1]);
-            verts[2] = matrix.apply(float_vertices[2]);
+            Point3LL verts[3];
+            verts[0] = matrix.apply(float_vertices[0].toPoint3d());
+            verts[1] = matrix.apply(float_vertices[1].toPoint3d());
+            verts[2] = matrix.apply(float_vertices[2].toPoint3d());
             mesh.addFace(verts[0], verts[1], verts[2]);
         }
 
-        mesh.mesh_name = object.name();
+        mesh.mesh_name_ = object.name();
         mesh.finish();
     }
     object_count++;

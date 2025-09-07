@@ -1,5 +1,5 @@
-//Copyright (c) 2021 Ultimaker B.V.
-//CuraEngine is released under the terms of the AGPLv3 or higher.
+// Copyright (c) 2023 UltiMaker
+// CuraEngine is released under the terms of the AGPLv3 or higher
 
 #ifndef LIGHTNING_TREE_NODE_H
 #define LIGHTNING_TREE_NODE_H
@@ -9,17 +9,16 @@
 #include <optional>
 #include <vector>
 
-#include "../utils/polygonUtils.h"
-#include "../utils/polygon.h"
+#include "geometry/LinesSet.h"
+#include "geometry/OpenLinesSet.h"
+#include "geometry/Polygon.h"
+#include "geometry/Shape.h"
+#include "utils/polygonUtils.h"
 
 namespace cura
 {
 
 constexpr coord_t locator_cell_size = 4000;
-
-class LightningTreeNode;
-
-using LightningTreeNodeSPtr = std::shared_ptr<LightningTreeNode>;
 
 // NOTE: As written, this struct will only be valid for a single layer, will have to be updated for the next.
 // NOTE: Reasons for implementing this with some separate closures:
@@ -37,13 +36,19 @@ using LightningTreeNodeSPtr = std::shared_ptr<LightningTreeNode>;
  */
 class LightningTreeNode : public std::enable_shared_from_this<LightningTreeNode>
 {
+    using LightningTreeNodeSPtr = std::shared_ptr<LightningTreeNode>;
+
 public:
     // Workaround for private/protected constructors and 'make_shared': https://stackoverflow.com/a/27832765
-    template<typename ...Arg> LightningTreeNodeSPtr static create(Arg&&...arg)
+    template<typename... Arg>
+    LightningTreeNodeSPtr static create(Arg&&... arg)
     {
         struct EnableMakeShared : public LightningTreeNode
         {
-            EnableMakeShared(Arg&&...arg) : LightningTreeNode(std::forward<Arg>(arg)...) {}
+            EnableMakeShared(Arg&&... arg)
+                : LightningTreeNode(std::forward<Arg>(arg)...)
+            {
+            }
         };
         return std::make_shared<EnableMakeShared>(std::forward<Arg>(arg)...);
     }
@@ -53,13 +58,13 @@ public:
      * path to print.
      * \return The position that this node represents.
      */
-    const Point& getLocation() const;
+    const Point2LL& getLocation() const;
 
     /*!
      * Change the position on this layer that the node represents.
      * \param p The position that the node needs to represent.
      */
-    void setLocation(const Point& p);
+    void setLocation(const Point2LL& p);
 
     /*!
      * Construct a new ``LightningTreeNode`` instance and add it as a child of
@@ -67,7 +72,7 @@ public:
      * \param p The location of the new node.
      * \return A shared pointer to the new node.
      */
-    LightningTreeNodeSPtr addChild(const Point& p);
+    LightningTreeNodeSPtr addChild(const Point2LL& p);
 
     /*!
      * Add an existing ``LightningTreeNode`` as a child of this node.
@@ -94,15 +99,13 @@ public:
      * \param max_remove_colinear_dist The maximum distance of a line-segment
      * from which straightening may remove a colinear point.
      */
-    void propagateToNextLayer
-    (
+    void propagateToNextLayer(
         std::vector<LightningTreeNodeSPtr>& next_trees,
-        const Polygons& next_outlines,
+        const Shape& next_outlines,
         const LocToLineGrid& outline_locator,
         const coord_t prune_distance,
         const coord_t smooth_magnitude,
-        const coord_t max_remove_colinear_dist
-    ) const;
+        const coord_t max_remove_colinear_dist) const;
 
     /*!
      * Executes a given function for every line segment in this node's sub-tree.
@@ -115,7 +118,7 @@ public:
      * \param visitor A function to execute for every branch in the node's sub-
      * tree.
      */
-    void visitBranches(const std::function<void(const Point&, const Point&)>& visitor) const;
+    void visitBranches(const std::function<void(const Point2LL&, const Point2LL&)>& visitor) const;
 
     /*!
      * Execute a given function for every node in this node's sub-tree.
@@ -139,7 +142,7 @@ public:
      * \param supporting_radius The maximum distance which can be bridged without (infill) supporting it.
      * \return The weighted distance.
      */
-    coord_t getWeightedDistance(const Point& unsupported_location, const coord_t& supporting_radius) const;
+    coord_t getWeightedDistance(const Point2LL& unsupported_location, const coord_t& supporting_radius) const;
 
     /*!
      * Returns whether this node is the root of a lightning tree. It is the root
@@ -147,7 +150,10 @@ public:
      * \return ``true`` if this node is the root (no parents) or ``false`` if it
      * is a child node of some other node.
      */
-    bool isRoot() const { return is_root; }
+    bool isRoot() const
+    {
+        return is_root_;
+    }
 
     /*!
      * Reverse the parent-child relationship all the way to the root, from this node onward.
@@ -163,7 +169,7 @@ public:
      * \param loc The specified location.
      * \result The branch that starts at the position closest to the location within this tree.
      */
-    LightningTreeNodeSPtr closestNode(const Point& loc);
+    LightningTreeNodeSPtr closestNode(const Point2LL& loc);
 
     /*!
      * Returns whether the given tree node is a descendant of this node.
@@ -185,7 +191,7 @@ protected:
      * Connecting other nodes to this node indicates that a line segment should
      * be drawn between those two physical positions.
      */
-    LightningTreeNode(const Point& p, const std::optional<Point>& last_grounding_location = std::nullopt);
+    LightningTreeNode(const Point2LL& p, const std::optional<Point2LL>& last_grounding_location = std::nullopt);
 
     /*!
      * Copy this node and its entire sub-tree.
@@ -197,12 +203,12 @@ protected:
     /*! Reconnect trees from the layer above to the new outlines of the lower layer.
      * \return Wether or not the root is kept (false is no, true is yes).
      */
-    bool realign(const Polygons& outlines, const LocToLineGrid& outline_locator, std::vector<LightningTreeNodeSPtr>& rerooted_parts);
+    bool realign(const Shape& outlines, const LocToLineGrid& outline_locator, std::vector<LightningTreeNodeSPtr>& rerooted_parts);
 
     struct RectilinearJunction
     {
         coord_t total_recti_dist; //!< rectilinear distance along the tree from the last junction above to the junction below
-        Point junction_loc; //!< junction location below
+        Point2LL junction_loc; //!< junction location below
     };
 
     /*!
@@ -219,7 +225,7 @@ protected:
      * \param max_remove_colinear_dist2 Maximum distance _squared_ of the (compound) line-segment from which a co-linear point may be removed.
      * \return the total distance along the tree from the last junction above to the first next junction below and the location of the next junction below
      */
-    RectilinearJunction straighten(const coord_t magnitude, const Point& junction_above, const coord_t accumulated_dist, const coord_t max_remove_colinear_dist2);
+    RectilinearJunction straighten(const coord_t magnitude, const Point2LL& junction_above, const coord_t accumulated_dist, const coord_t max_remove_colinear_dist2);
 
     /*! Prune the tree from the extremeties (leaf-nodes) until the pruning distance is reached.
      * \return The distance that has been pruned. If less than \p distance, then the whole tree was puned away.
@@ -229,42 +235,42 @@ protected:
 public:
     /*!
      * Convert the tree into polylines
-     * 
+     *
      * At each junction one line is chosen at random to continue
-     * 
+     *
      * The lines start at a leaf and end in a junction
-     * 
+     *
      * \param output all branches in this tree connected into polylines
      */
-    void convertToPolylines(Polygons& output, const coord_t line_width) const;
+    void convertToPolylines(OpenLinesSet& output, const coord_t line_width) const;
 
     /*! If this was ever a direct child of the root, it'll have a previous grounding location.
      *
      * This needs to be known when roots are reconnected, so that the last (higher) layer is supported by the next one.
      */
-    const std::optional<Point>& getLastGroundingLocation() const;
+    const std::optional<Point2LL>& getLastGroundingLocation() const;
 
 protected:
     /*!
      * Convert the tree into polylines
-     * 
+     *
      * At each junction one line is chosen at random to continue
-     * 
+     *
      * The lines start at a leaf and end in a junction
-     * 
+     *
      * \param long_line a reference to a polyline in \p output which to continue building on in the recursion
      * \param output all branches in this tree connected into polylines
      */
-    void convertToPolylines(size_t long_line_idx, Polygons& output) const;
+    void convertToPolylines(size_t long_line_idx, OpenLinesSet& output) const;
 
-    void removeJunctionOverlap(Polygons& polylines, const coord_t line_width) const;
+    void removeJunctionOverlap(OpenLinesSet& polylines, const coord_t line_width) const;
 
-    bool is_root;
-    Point p;
-    std::weak_ptr<LightningTreeNode> parent;
-    std::vector<LightningTreeNodeSPtr> children;
+    bool is_root_;
+    Point2LL p_;
+    std::weak_ptr<LightningTreeNode> parent_;
+    std::vector<LightningTreeNodeSPtr> children_;
 
-    std::optional<Point> last_grounding_location;  //<! The last known grounding location, see 'getLastGroundingLocation()'.
+    std::optional<Point2LL> last_grounding_location_; //<! The last known grounding location, see 'getLastGroundingLocation()'.
 };
 
 } // namespace cura

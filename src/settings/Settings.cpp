@@ -1,31 +1,37 @@
-// Copyright (c) 2022 Ultimaker B.V.
+// Copyright (c) 2024 UltiMaker
 // CuraEngine is released under the terms of the AGPLv3 or higher
 
+#include "settings/Settings.h"
+
 #include <cctype>
+#include <cstdio>
 #include <fstream>
+#include <numbers>
 #include <regex> // regex parsing for temp flow graph
 #include <sstream> // ostringstream
-#include <stdio.h>
 #include <string> //Parsing strings (stod, stoul).
 
+#include <range/v3/range/conversion.hpp>
+#include <range/v3/view/map.hpp>
 #include <spdlog/spdlog.h>
 
 #include "Application.h" //To get the extruders.
 #include "BeadingStrategy/BeadingStrategyFactory.h"
 #include "ExtruderTrain.h"
 #include "Slice.h"
+#include "geometry/Polygon.h"
+#include "geometry/Shape.h"
 #include "settings/EnumSettings.h"
 #include "settings/FlowTempGraph.h"
-#include "settings/Settings.h"
 #include "settings/types/Angle.h"
 #include "settings/types/Duration.h" //For duration and time settings.
 #include "settings/types/LayerIndex.h" //For layer index settings.
 #include "settings/types/Ratio.h" //For ratio settings and percentages.
 #include "settings/types/Temperature.h" //For temperature settings.
 #include "settings/types/Velocity.h" //For velocity settings.
-#include "utils/FMatrix4x3.h"
+#include "utils/Matrix4x3D.h"
 #include "utils/string.h" //For Escaped.
-#include "utils/polygon.h"
+#include "utils/types/string_switch.h" //For string switch.
 
 namespace cura
 {
@@ -56,10 +62,10 @@ std::string Settings::get<std::string>(const std::string& key) const
         return settings.at(key);
     }
 
-    const std::unordered_map<std::string, ExtruderTrain*>& limit_to_extruder = Application::getInstance().current_slice->scene.limit_to_extruder;
+    const std::unordered_map<std::string, ExtruderTrain*>& limit_to_extruder = Application::getInstance().current_slice_->scene.limit_to_extruder;
     if (limit_to_extruder.find(key) != limit_to_extruder.end())
     {
-        return limit_to_extruder.at(key)->settings.getWithoutLimiting(key);
+        return limit_to_extruder.at(key)->settings_.getWithoutLimiting(key);
     }
 
     if (parent)
@@ -109,23 +115,24 @@ ExtruderTrain& Settings::get<ExtruderTrain&>(const std::string& key) const
     {
         extruder_nr = get<size_t>("extruder_nr");
     }
-    return Application::getInstance().current_slice->scene.extruders[extruder_nr];
+    return Application::getInstance().current_slice_->scene.extruders[extruder_nr];
 }
 
-template<> std::vector<ExtruderTrain*> Settings::get<std::vector<ExtruderTrain*>>(const std::string& key) const
+template<>
+std::vector<ExtruderTrain*> Settings::get<std::vector<ExtruderTrain*>>(const std::string& key) const
 {
     int extruder_nr = std::atoi(get<std::string>(key).c_str());
     std::vector<ExtruderTrain*> ret;
     if (extruder_nr < 0)
     {
-        for (ExtruderTrain& train : Application::getInstance().current_slice->scene.extruders)
+        for (ExtruderTrain& train : Application::getInstance().current_slice_->scene.extruders)
         {
             ret.emplace_back(&train);
         }
     }
     else
     {
-        ret.emplace_back(&Application::getInstance().current_slice->scene.extruders[extruder_nr]);
+        ret.emplace_back(&Application::getInstance().current_slice_->scene.extruders[extruder_nr]);
     }
     return ret;
 }
@@ -133,7 +140,8 @@ template<> std::vector<ExtruderTrain*> Settings::get<std::vector<ExtruderTrain*>
 template<>
 LayerIndex Settings::get<LayerIndex>(const std::string& key) const
 {
-    return std::atoi(get<std::string>(key).c_str()) - 1; // For the user we display layer numbers starting from 1, but we start counting from 0. Still it may be negative for Raft layers.
+    // For the user we display layer numbers starting from 1, but we start counting from 0. Still it may be negative for Raft layers.
+    return std::atoi(get<std::string>(key).c_str()) - 1;
 }
 
 template<>
@@ -145,7 +153,7 @@ coord_t Settings::get<coord_t>(const std::string& key) const
 template<>
 AngleRadians Settings::get<AngleRadians>(const std::string& key) const
 {
-    return get<double>(key) * M_PI / 180; // The settings are all in degrees, but we need to interpret them as radians.
+    return get<double>(key) * std::numbers::pi / 180; // The settings are all in degrees, but we need to interpret them as radians.
 }
 
 template<>
@@ -167,9 +175,15 @@ Velocity Settings::get<Velocity>(const std::string& key) const
 }
 
 template<>
+Acceleration Settings::get<Acceleration>(const std::string& key) const
+{
+    return get<double>(key);
+}
+
+template<>
 Ratio Settings::get<Ratio>(const std::string& key) const
 {
-    return get<double>(key) / 100.0; // The settings are all in percentages, but we need to interpret them as radians.
+    return get<double>(key) / 100.0; // The settings are all in percentages, but we need to interpret them as ratios.
 }
 
 template<>
@@ -182,12 +196,16 @@ template<>
 DraftShieldHeightLimitation Settings::get<DraftShieldHeightLimitation>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "limited")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "full"_sw:
+        return DraftShieldHeightLimitation::FULL;
+    case "limited"_sw:
         return DraftShieldHeightLimitation::LIMITED;
-    }
-    else // if (value == "full") or default.
-    {
+    case "plugin"_sw:
+        return DraftShieldHeightLimitation::PLUGIN;
+    default:
         return DraftShieldHeightLimitation::FULL;
     }
 }
@@ -229,7 +247,7 @@ FlowTempGraph Settings::get<FlowTempGraph>(const std::string& key) const
         {
             double first = std::stod(first_substring);
             double second = std::stod(second_substring);
-            result.data.emplace_back(first, second);
+            result.data_.emplace_back(first, second);
         }
         catch (const std::invalid_argument& e)
         {
@@ -240,14 +258,15 @@ FlowTempGraph Settings::get<FlowTempGraph>(const std::string& key) const
     return result;
 }
 
-template<> Polygons Settings::get<Polygons>(const std::string& key) const
+template<>
+Shape Settings::get<Shape>(const std::string& key) const
 {
     std::string value_string = get<std::string>(key);
 
-    Polygons result;
+    Shape result;
     if (value_string.empty())
     {
-        return result; //Empty at this point.
+        return result; // Empty at this point.
     }
     /* We're looking to match one or more floating point values separated by
      * commas and surrounded by square brackets. Note that because the QML
@@ -260,22 +279,21 @@ template<> Polygons Settings::get<Polygons>(const std::string& key) const
     if (std::regex_search(value_string, polygons_match, polygons_regex) && polygons_match.size() > 1)
     {
         std::string polygons_string = polygons_match.str(1);
-        
+
         std::regex polygon_regex(R"(\[((\[[^\[\]]*\]\s*,?\s*)*)\]\s*,?)"); // matches with a list of lists (a list of 2D vertices)
         std::smatch polygon_match;
-        
-        std::regex_token_iterator<std::string::iterator> rend; //Default constructor gets the end-of-sequence iterator.
+
+        std::regex_token_iterator<std::string::iterator> rend; // Default constructor gets the end-of-sequence iterator.
         std::regex_token_iterator<std::string::iterator> polygon_match_iter(polygons_string.begin(), polygons_string.end(), polygon_regex, 0);
         while (polygon_match_iter != rend)
         {
             std::string polygon_str = *polygon_match_iter++;
-            
-            result.emplace_back();
-            PolygonRef poly = result.back();
+
+            Polygon& poly = result.newLine();
 
             std::regex point2D_regex(R"(\[([^,\[]*),([^,\]]*)\])"); // matches to a list of exactly two things
 
-            const int submatches[] = {1, 2}; // Match first number and second number of a pair.
+            const int submatches[] = { 1, 2 }; // Match first number and second number of a pair.
             std::regex_token_iterator<std::string::iterator> match_iter(polygon_str.begin(), polygon_str.end(), point2D_regex, submatches);
             while (match_iter != rend)
             {
@@ -302,11 +320,11 @@ template<> Polygons Settings::get<Polygons>(const std::string& key) const
 }
 
 template<>
-FMatrix4x3 Settings::get<FMatrix4x3>(const std::string& key) const
+Matrix4x3D Settings::get<Matrix4x3D>(const std::string& key) const
 {
     const std::string value_string = get<std::string>(key);
 
-    FMatrix4x3 result;
+    Matrix4x3D result;
     if (value_string.empty())
     {
         return result; // Standard matrix ([[1,0,0], [0,1,0], [0,0,1]]).
@@ -346,105 +364,76 @@ template<>
 EGCodeFlavor Settings::get<EGCodeFlavor>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    // I wish that switch statements worked for std::string...
-    if (value == "Griffin")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "Marlin"_sw:
+        return EGCodeFlavor::MARLIN;
+    case "Griffin"_sw:
         return EGCodeFlavor::GRIFFIN;
-    }
-    else if (value == "UltiGCode")
-    {
+    case "Cheetah"_sw:
+        return EGCodeFlavor::CHEETAH;
+    case "UltiGCode"_sw:
         return EGCodeFlavor::ULTIGCODE;
-    }
-    else if (value == "Makerbot")
-    {
+    case "Makerbot"_sw:
         return EGCodeFlavor::MAKERBOT;
-    }
-    else if (value == "BFB")
-    {
+    case "BFB"_sw:
         return EGCodeFlavor::BFB;
-    }
-    else if (value == "MACH3")
-    {
+    case "MACH3"_sw:
         return EGCodeFlavor::MACH3;
-    }
-    else if (value == "RepRap (Volumetric)")
-    {
+    case "RepRap (Volumetric)"_sw:
         return EGCodeFlavor::MARLIN_VOLUMATRIC;
-    }
-    else if (value == "Repetier")
-    {
+    case "Repetier"_sw:
         return EGCodeFlavor::REPETIER;
-    }
-    else if (value == "RepRap (RepRap)")
-    {
+    case "RepRap (RepRap)"_sw:
         return EGCodeFlavor::REPRAP;
+    case "plugin"_sw:
+        return EGCodeFlavor::PLUGIN;
+    default:
+        return EGCodeFlavor::MARLIN;
     }
-    // Default:
-    return EGCodeFlavor::MARLIN;
 }
 
 template<>
 EFillMethod Settings::get<EFillMethod>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "lines")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "none"_sw:
+        return EFillMethod::NONE;
+    case "lines"_sw:
         return EFillMethod::LINES;
-    }
-    else if (value == "grid")
-    {
+    case "grid"_sw:
         return EFillMethod::GRID;
-    }
-    else if (value == "cubic")
-    {
+    case "cubic"_sw:
         return EFillMethod::CUBIC;
-    }
-    else if (value == "cubicsubdiv")
-    {
+    case "cubicsubdiv"_sw:
         return EFillMethod::CUBICSUBDIV;
-    }
-    else if (value == "tetrahedral")
-    {
+    case "tetrahedral"_sw:
         return EFillMethod::TETRAHEDRAL;
-    }
-    else if (value == "quarter_cubic")
-    {
+    case "quarter_cubic"_sw:
         return EFillMethod::QUARTER_CUBIC;
-    }
-    else if (value == "triangles")
-    {
+    case "triangles"_sw:
         return EFillMethod::TRIANGLES;
-    }
-    else if (value == "trihexagon")
-    {
+    case "trihexagon"_sw:
         return EFillMethod::TRIHEXAGON;
-    }
-    else if (value == "concentric")
-    {
+    case "concentric"_sw:
         return EFillMethod::CONCENTRIC;
-    }
-    else if (value == "zigzag")
-    {
+    case "zigzag"_sw:
         return EFillMethod::ZIG_ZAG;
-    }
-    else if (value == "cross")
-    {
+    case "cross"_sw:
         return EFillMethod::CROSS;
-    }
-    else if (value == "cross_3d")
-    {
+    case "cross_3d"_sw:
         return EFillMethod::CROSS_3D;
-    }
-    else if (value == "gyroid")
-    {
+    case "gyroid"_sw:
         return EFillMethod::GYROID;
-    }
-    else if (value == "lightning")
-    {
+    case "lightning"_sw:
         return EFillMethod::LIGHTNING;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return EFillMethod::PLUGIN;
+    default:
         return EFillMethod::NONE;
     }
 }
@@ -453,21 +442,39 @@ template<>
 EPlatformAdhesion Settings::get<EPlatformAdhesion>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "brim")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
-        return EPlatformAdhesion::BRIM;
-    }
-    else if (value == "raft")
-    {
-        return EPlatformAdhesion::RAFT;
-    }
-    else if (value == "none")
-    {
-        return EPlatformAdhesion::NONE;
-    }
-    else // Default.
-    {
+    case "skirt"_sw:
         return EPlatformAdhesion::SKIRT;
+    case "brim"_sw:
+        return EPlatformAdhesion::BRIM;
+    case "raft"_sw:
+        return EPlatformAdhesion::RAFT;
+    case "none"_sw:
+        return EPlatformAdhesion::NONE;
+    case "plugin"_sw:
+        return EPlatformAdhesion::PLUGIN;
+    default:
+        return EPlatformAdhesion::SKIRT;
+    }
+}
+
+template<>
+EExtraInfillLinesToSupportSkins Settings::get<EExtraInfillLinesToSupportSkins>(const std::string& key) const
+{
+    const std::string& value = get<std::string>(key);
+    using namespace cura::utils;
+    switch (hash_enum(value))
+    {
+    case "walls_and_lines"_sw:
+        return EExtraInfillLinesToSupportSkins::WALLS_AND_LINES;
+    case "walls"_sw:
+        return EExtraInfillLinesToSupportSkins::WALLS;
+    case "none"_sw:
+        return EExtraInfillLinesToSupportSkins::NONE;
+    default:
+        return EExtraInfillLinesToSupportSkins::WALLS_AND_LINES;
     }
 }
 
@@ -475,16 +482,18 @@ template<>
 ESupportType Settings::get<ESupportType>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "everywhere")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "none"_sw:
+        return ESupportType::NONE;
+    case "everywhere"_sw:
         return ESupportType::EVERYWHERE;
-    }
-    else if (value == "buildplate")
-    {
+    case "buildplate"_sw:
         return ESupportType::PLATFORM_ONLY;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return ESupportType::PLUGIN;
+    default:
         return ESupportType::NONE;
     }
 }
@@ -493,16 +502,16 @@ template<>
 ESupportStructure Settings::get<ESupportStructure>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "normal")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "normal"_sw:
         return ESupportStructure::NORMAL;
-    }
-    else if (value == "tree")
-    {
+    case "tree"_sw:
         return ESupportStructure::TREE;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return ESupportStructure::PLUGIN;
+    default:
         return ESupportStructure::NORMAL;
     }
 }
@@ -512,20 +521,20 @@ template<>
 EZSeamType Settings::get<EZSeamType>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "random")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "shortest"_sw:
+        return EZSeamType::SHORTEST;
+    case "random"_sw:
         return EZSeamType::RANDOM;
-    }
-    else if (value == "back") // It's called 'back' internally because originally this was intended to allow the user to put the seam in the back of the object where it's less visible.
-    {
+    case "back"_sw:
         return EZSeamType::USER_SPECIFIED;
-    }
-    else if (value == "sharpest_corner")
-    {
+    case "sharpest_corner"_sw:
         return EZSeamType::SHARPEST_CORNER;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return EZSeamType::PLUGIN;
+    default:
         return EZSeamType::SHORTEST;
     }
 }
@@ -534,24 +543,22 @@ template<>
 EZSeamCornerPrefType Settings::get<EZSeamCornerPrefType>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "z_seam_corner_inner")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "z_seam_corner_none"_sw:
+        return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_NONE;
+    case "z_seam_corner_inner"_sw:
         return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_INNER;
-    }
-    else if (value == "z_seam_corner_outer")
-    {
+    case "z_seam_corner_outer"_sw:
         return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_OUTER;
-    }
-    else if (value == "z_seam_corner_any")
-    {
+    case "z_seam_corner_any"_sw:
         return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_ANY;
-    }
-    else if (value == "z_seam_corner_weighted")
-    {
+    case "z_seam_corner_weighted"_sw:
         return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_WEIGHTED;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return EZSeamCornerPrefType::PLUGIN;
+    default:
         return EZSeamCornerPrefType::Z_SEAM_CORNER_PREF_NONE;
     }
 }
@@ -560,16 +567,18 @@ template<>
 ESurfaceMode Settings::get<ESurfaceMode>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "surface")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "normal"_sw:
+        return ESurfaceMode::NORMAL;
+    case "surface"_sw:
         return ESurfaceMode::SURFACE;
-    }
-    else if (value == "both")
-    {
+    case "both"_sw:
         return ESurfaceMode::BOTH;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return ESurfaceMode::PLUGIN;
+    default:
         return ESurfaceMode::NORMAL;
     }
 }
@@ -577,12 +586,17 @@ ESurfaceMode Settings::get<ESurfaceMode>(const std::string& key) const
 template<>
 FillPerimeterGapMode Settings::get<FillPerimeterGapMode>(const std::string& key) const
 {
-    if (get<std::string>(key) == "everywhere")
+    const std::string& value = get<std::string>(key);
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "nowhere"_sw:
+        return FillPerimeterGapMode::NOWHERE;
+    case "everywhere"_sw:
         return FillPerimeterGapMode::EVERYWHERE;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return FillPerimeterGapMode::PLUGIN;
+    default:
         return FillPerimeterGapMode::NOWHERE;
     }
 }
@@ -590,12 +604,17 @@ FillPerimeterGapMode Settings::get<FillPerimeterGapMode>(const std::string& key)
 template<>
 BuildPlateShape Settings::get<BuildPlateShape>(const std::string& key) const
 {
-    if (get<std::string>(key) == "elliptic")
+    const std::string& value = get<std::string>(key);
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "rectangular"_sw:
+        return BuildPlateShape::RECTANGULAR;
+    case "elliptic"_sw:
         return BuildPlateShape::ELLIPTIC;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return BuildPlateShape::PLUGIN;
+    default:
         return BuildPlateShape::RECTANGULAR;
     }
 }
@@ -604,24 +623,22 @@ template<>
 CombingMode Settings::get<CombingMode>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "off")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "all"_sw:
+        return CombingMode::ALL;
+    case "off"_sw:
         return CombingMode::OFF;
-    }
-    else if (value == "noskin")
-    {
+    case "noskin"_sw:
         return CombingMode::NO_SKIN;
-    }
-    else if (value == "no_outer_surfaces")
-    {
+    case "no_outer_surfaces"_sw:
         return CombingMode::NO_OUTER_SURFACES;
-    }
-    else if (value == "infill")
-    {
+    case "infill"_sw:
         return CombingMode::INFILL;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return CombingMode::PLUGIN;
+    default:
         return CombingMode::ALL;
     }
 }
@@ -629,12 +646,17 @@ CombingMode Settings::get<CombingMode>(const std::string& key) const
 template<>
 SupportDistPriority Settings::get<SupportDistPriority>(const std::string& key) const
 {
-    if (get<std::string>(key) == "z_overrides_xy")
+    const std::string& value = get<std::string>(key);
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "xy_overrides_z"_sw:
+        return SupportDistPriority::XY_OVERRIDES_Z;
+    case "z_overrides_xy"_sw:
         return SupportDistPriority::Z_OVERRIDES_XY;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return SupportDistPriority::PLUGIN;
+    default:
         return SupportDistPriority::XY_OVERRIDES_Z;
     }
 }
@@ -643,16 +665,18 @@ template<>
 SlicingTolerance Settings::get<SlicingTolerance>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "inclusive")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "middle"_sw:
+        return SlicingTolerance::MIDDLE;
+    case "inclusive"_sw:
         return SlicingTolerance::INCLUSIVE;
-    }
-    else if (value == "exclusive")
-    {
+    case "exclusive"_sw:
         return SlicingTolerance::EXCLUSIVE;
-    }
-    else // Default.
-    {
+    case "plugin"_sw:
+        return SlicingTolerance::PLUGIN;
+    default:
         return SlicingTolerance::MIDDLE;
     }
 }
@@ -661,13 +685,65 @@ template<>
 InsetDirection Settings::get<InsetDirection>(const std::string& key) const
 {
     const std::string& value = get<std::string>(key);
-    if (value == "outside_in")
+    using namespace cura::utils;
+    switch (hash_enum(value))
     {
+    case "inside_out"_sw:
+        return InsetDirection::INSIDE_OUT;
+    case "outside_in"_sw:
         return InsetDirection::OUTSIDE_IN;
+    case "plugin"_sw:
+        return InsetDirection::PLUGIN;
+    default:
+        return InsetDirection::INSIDE_OUT;
+    }
+}
+
+template<>
+PrimeTowerMode Settings::get<PrimeTowerMode>(const std::string& key) const
+{
+    const std::string& value = get<std::string>(key);
+    if (value == "interleaved")
+    {
+        return PrimeTowerMode::INTERLEAVED;
+    }
+
+    return PrimeTowerMode::NORMAL;
+}
+
+template<>
+BrimLocation Settings::get<BrimLocation>(const std::string& key) const
+{
+    const std::string& value = get<std::string>(key);
+    if (value == "everywhere")
+    {
+        return BrimLocation::EVERYWHERE;
+    }
+    else if (value == "inside")
+    {
+        return BrimLocation::INSIDE;
     }
     else // Default.
     {
-        return InsetDirection::INSIDE_OUT;
+        return BrimLocation::OUTSIDE;
+    }
+}
+
+template<>
+CoolDuringExtruderSwitch Settings::get<CoolDuringExtruderSwitch>(const std::string& key) const
+{
+    const std::string& value = get<std::string>(key);
+    if (value == "all_fans")
+    {
+        return CoolDuringExtruderSwitch::ALL_FANS;
+    }
+    else if (value == "only_last_extruder")
+    {
+        return CoolDuringExtruderSwitch::ONLY_LAST_EXTRUDER;
+    }
+    else // Default.
+    {
+        return CoolDuringExtruderSwitch::UNCHANGED;
     }
 }
 
@@ -710,6 +786,22 @@ std::vector<double> Settings::get<std::vector<double>>(const std::string& key) c
             }
         }
     }
+    return result;
+}
+
+template<>
+std::vector<Ratio> Settings::get<std::vector<Ratio>>(const std::string& key) const
+{
+    auto values_double = get<std::vector<double>>(key);
+
+    // The settings are all in percentages, but we need to interpret them as ratios.
+    std::vector<Ratio> result;
+    result.reserve(values_double.size());
+    for (const auto& value_double : values_double)
+    {
+        result.emplace_back(value_double / 100.0);
+    }
+
     return result;
 }
 
@@ -770,6 +862,27 @@ std::string Settings::getWithoutLimiting(const std::string& key) const
         spdlog::error("Trying to retrieve setting with no value given: {}", key);
         std::exit(2);
     }
+}
+
+std::unordered_map<std::string, std::string> Settings::getFlattendSettings() const
+{
+    auto keys = getKeys();
+    return keys
+         | ranges::views::transform(
+               [&](const auto& key)
+               {
+                   return std::pair<std::string, std::string>(key, get<std::string>(key));
+               })
+         | ranges::to<std::unordered_map<std::string, std::string>>();
+}
+
+std::vector<std::string> Settings::getKeys() const
+{
+    if (parent)
+    {
+        return parent->getKeys();
+    }
+    return ranges::views::keys(settings) | ranges::to_vector;
 }
 
 } // namespace cura

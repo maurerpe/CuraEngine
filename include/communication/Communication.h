@@ -4,16 +4,16 @@
 #ifndef COMMUNICATION_H
 #define COMMUNICATION_H
 
-#include "../utils/IntPoint.h" //For coord_t and Point.
+#include "geometry/Point2LL.h"
+#include "settings/types/LayerIndex.h"
+#include "settings/types/Velocity.h"
 
 namespace cura
 {
-//Some forward declarations to increase compilation speed.
-struct LayerIndex;
-struct Velocity;
+// Some forward declarations to increase compilation speed.
 enum class PrintFeatureType : unsigned char;
-class Polygons;
-class ConstPolygonRef;
+class Shape;
+class Polygon;
 class ExtruderTrain;
 
 /*
@@ -26,7 +26,7 @@ public:
     /*
      * \brief Close the communication channel.
      */
-    virtual ~Communication() {}
+    virtual ~Communication() = default;
 
     /*
      * \brief Test if there are more slices to be queued.
@@ -49,7 +49,7 @@ public:
      * \brief Indicate to the communication channel what the current progress of
      * slicing the current slice is.
      */
-    virtual void sendProgress(const float& progress) const = 0;
+    virtual void sendProgress(double progress) const = 0;
 
     /*
      * \brief Indicate to the communication channel that a layer is complete and
@@ -62,35 +62,7 @@ public:
      * \param z The z-coordinate of the top side of the layer.
      * \param thickness The thickness of the layer.
      */
-    virtual void sendLayerComplete(const LayerIndex& layer_nr, const coord_t& z, const coord_t& thickness) = 0;
-
-    /*
-     * \brief Send polygons to the user to visualise.
-     *
-     * The polygons may not actually be flushed until ``sendLayerComplete`` is
-     * called.
-     * \param type The type of print feature the polygons represent (infill,
-     * wall, support, etc).
-     * \param polygons The shapes to visualise.
-     * \param line_width The width of the lines in these polygons.
-     * \param line_thickness The thickness (in the Z direction) of the polygons.
-     * \param velocity The velocity of printing these polygons.
-     */
-    virtual void sendPolygons(const PrintFeatureType& type, const Polygons& polygons, const coord_t& line_width, const coord_t& line_thickness, const Velocity& velocity) = 0;
-
-    /*
-     * \brief Send a polygon to the user to visualise.
-     *
-     * The polygons may not actually be flushed until ``sendLayerComplete`` is
-     * called.
-     * \param type The type of print feature the polygon represents (infill,
-     * wall, support, etc).
-     * \param polygon The shape to visualise.
-     * \param line_width The width of the lines in this polygon.
-     * \param line_thickness The thickness (in the Z direction) of the polygon.
-     * \param velocity The velocity of printing this polygon.
-     */
-    virtual void sendPolygon(const PrintFeatureType& type, const ConstPolygonRef& polygon, const coord_t& line_width, const coord_t& line_thickness, const Velocity& velocity) = 0;
+    virtual void sendLayerComplete(const LayerIndex::value_type& layer_nr, const coord_t& z, const coord_t& thickness) = 0;
 
     /*
      * \brief Send a line to the user to visualise.
@@ -104,7 +76,7 @@ public:
      * \param line_thickness The thickness (in the Z direction) of the line.
      * \param velocity The velocity of printing this polygon.
      */
-    virtual void sendLineTo(const PrintFeatureType& type, const Point& to, const coord_t& line_width, const coord_t& line_thickness, const Velocity& velocity) = 0;
+    virtual void sendLineTo(const PrintFeatureType& type, const Point3LL& to, const coord_t& line_width, const coord_t& line_thickness, const Velocity& velocity) = 0;
 
     /*
      * \brief Send the current position to visualise.
@@ -112,7 +84,7 @@ public:
      * This may indicate the starting position (or any other jump in the path).
      * \param position The current position to start the next line at.
      */
-    virtual void sendCurrentPosition(const Point& position) = 0;
+    virtual void sendCurrentPosition(const Point3LL& position) = 0;
 
     /*
      * \brief Set which extruder is being used for the following calls to
@@ -126,7 +98,7 @@ public:
      * \param layer_nr The index of the layer to send data for. This is zero-
      * indexed but may be negative for raft layers.
      */
-    virtual void setLayerForSend(const LayerIndex& layer_nr) = 0;
+    virtual void setLayerForSend(const LayerIndex::value_type& layer_nr) = 0;
 
     /*
      * \brief Send the sliced layer data through this communication after the
@@ -180,7 +152,6 @@ public:
     virtual void sliceNext() = 0;
 };
 
-} //namespace cura
+} // namespace cura
 
-#endif //COMMUNICATION_H
-
+#endif // COMMUNICATION_H
