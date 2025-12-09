@@ -417,10 +417,18 @@ private:
      * mesh which should be printed with this extruder.
      * \param mesh_config The line config with which to print a print feature.
      * \param part The part for which to create gcode.
+     * \param start_move_inwards_length The length of the extra inwards moves to be added at the start of each infill line
+     * \param end_move_inwards_length The length of the extra inwards moves to be added at the end of each infill line
      * \return Whether this function added anything to the layer plan.
      */
-    bool processMultiLayerInfill(LayerPlan& gcodeLayer, const SliceMeshStorage& mesh, const size_t extruder_nr, const MeshPathConfigs& mesh_config, const SliceLayerPart& part)
-        const;
+    bool processMultiLayerInfill(
+        LayerPlan& gcodeLayer,
+        const SliceMeshStorage& mesh,
+        const size_t extruder_nr,
+        const MeshPathConfigs& mesh_config,
+        const SliceLayerPart& part,
+        const coord_t start_move_inwards_length = 0,
+        const coord_t end_move_inwards_length = 0) const;
 
     /*!
      * \brief Add normal sparse infill for a given part in a layer.
@@ -430,6 +438,8 @@ private:
      * mesh which should be printed with this extruder
      * \param mesh_config The line config with which to print a print feature.
      * \param part The part for which to create gcode.
+     * \param start_move_inwards_length The length of the extra inwards moves to be added at the start of each infill line
+     * \param end_move_inwards_length The length of the extra inwards moves to be added at the end of each infill line
      * \return Whether this function added anything to the layer plan.
      */
     bool processSingleLayerInfill(
@@ -438,7 +448,9 @@ private:
         const SliceMeshStorage& mesh,
         const size_t extruder_nr,
         const MeshPathConfigs& mesh_config,
-        const SliceLayerPart& part) const;
+        const SliceLayerPart& part,
+        const coord_t start_move_inwards_length = 0,
+        const coord_t end_move_inwards_length = 0) const;
 
     /*!
      * Generate the insets for the walls of a given layer part.
@@ -575,6 +587,7 @@ private:
      * \param skin_overlap The amount by which to expand the \p area
      * \param skin density Sets the density of the the skin lines by adjusting the distance between them (normal skin is 1.0)
      * \param monotonic Whether to order lines monotonically (``true``) or to
+     * \param is_roofing_flooring Indicates whether we are currently processing a top/bottom layer, or a skin layer
      * minimise travel moves (``false``).
      * \param[out] added_something Whether this function added anything to the layer plan
      * \param fan_speed fan speed override for this skin area
@@ -591,6 +604,7 @@ private:
         const coord_t skin_overlap,
         const Ratio skin_density,
         const bool monotonic,
+        const bool is_roofing_flooring,
         bool& added_something,
         double fan_speed = GCodePathConfig::FAN_SPEED_DEFAULT) const;
 
