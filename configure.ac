@@ -25,6 +25,9 @@ AX_CXX_CHECK_LIB(spdlog, [spdlog::spdlog_ex::what() const],,AC_MSG_ERROR([Could 
 PKG_CHECK_MODULES(FMT, [fmt],,AC_MSG_ERROR([Could not find required fmt library]))
 AC_SUBST([FMT_CFLAGS])
 AC_SUBST([FMT_LIBS])
+PKG_CHECK_MODULES(TBB, [tbb],,AC_MSG_ERROR([Could not find required tbb library]))
+AC_SUBST([TBB_CFLAGS])
+AC_SUBST([TBB_LIBS])
 
 AS_IF([test "x$with_arcus" != "xno"],
 [AX_CXX_CHECK_LIB(Arcus,[Arcus::Socket::getState() const],arcus=yes,AC_MSG_WARN([Could not find requested Arcus library: building without Arcus support]))]

@@ -1,5 +1,5 @@
 AM_CPPFLAGS = -I../include @ARCUS_CPPFLAGS@ -I@builddir@
-AM_CXXFLAGS = -std=c++20 @FMT_CFLAGS@ @PROTOBUF_CFLAGS@
+AM_CXXFLAGS = -std=c++20 @FMT_CFLAGS@ @PROTOBUF_CFLAGS@ @TBB_CFLAGS@
 
 dist_noinst_DATA = ../Cura.proto
 MOSTLYCLEANFILES = Cura.pb.cc Cura.ph.h
@@ -7,7 +7,7 @@ BUILT_SOURCES =
 
 bin_PROGRAMS = CuraEngine
 CuraEngine_SOURCES = \
-	main.cpp \
+        main.cpp \
         Application.cpp \
         bridge.cpp \
         ConicalOverhang.cpp \
@@ -26,6 +26,7 @@ CuraEngine_SOURCES = \
         LayerPlanBuffer.cpp \
         mesh.cpp \
         MeshGroup.cpp \
+        MeshMaterialSplitter.cpp \
         Mold.cpp \
         multiVolumes.cpp \
         path_ordering.cpp \
@@ -102,8 +103,10 @@ CuraEngine_SOURCES = \
         utils/linearAlg2D.cpp \
         utils/ListPolyIt.cpp \
         utils/Matrix4x3D.cpp \
+        utils/MeshUtils.cpp \
         utils/MinimumSpanningTree.cpp \
         utils/OBJ.cpp \
+        utils/ParameterizedSegment.cpp \
         utils/PolygonConnector.cpp \
         utils/PolygonsPointIndex.cpp \
         utils/PolygonsSegmentIndex.cpp \
@@ -111,10 +114,12 @@ CuraEngine_SOURCES = \
         utils/PolylineStitcher.cpp \
         utils/Simplify.cpp \
         utils/SVG.cpp \
+        utils/SpatialLookup.cpp \
         utils/SquareGrid.cpp \
         utils/ThreadPool.cpp \
         utils/ToolpathVisualizer.cpp \
         utils/VoronoiUtils.cpp \
+        utils/VoxelGrid.cpp \
         utils/VoxelUtils.cpp \
         utils/MixedPolylineStitcher.cpp \
         utils/scoring/BestElementFinder.cpp \
@@ -134,14 +139,15 @@ CuraEngine_SOURCES = \
         geometry/LinesSet.cpp \
         geometry/Polyline.cpp \
         geometry/ClosedPolyline.cpp \
-        geometry/MixedLinesSet.cpp
+        geometry/MixedLinesSet.cpp \
+        geometry/conversions/Point2D_Point2LL.cpp
 
 if ARCUS
 CuraEngine_SOURCES += @builddir@/Cura.pb.cc
 BUILT_SOURCES += Cura.pb.h
 endif
 
-CuraEngine_LDADD = @FMT_LIBS@ @PROTOBUF_LIBS@
+CuraEngine_LDADD = @FMT_LIBS@ @PROTOBUF_LIBS@ @TBB_LIBS@
 
 %.pb.cc %.pb.h: ../%.proto
 	$(PROTOC) --proto_path=@srcdir@/.. --cpp_out=@builddir@ $^
